@@ -25,8 +25,11 @@ from udi_interface import Custom
 
 try:
     from roborock.roborock_typing import RoborockCommand
+    from roborock.web_api import RoborockApiClient
+    from roborock.data.containers import UserData
+    from roborock.devices.device_manager import create_device_manager, UserParams
 except ImportError:
-    RoborockCommand = None  # populated once roborock package is installed
+    RoborockCommand = RoborockApiClient = UserData = create_device_manager = UserParams = None
 
 LOGGER = udi_interface.LOGGER
 
@@ -267,15 +270,16 @@ class VacuumNode(udi_interface.Node):
             self._driver_cache[driver] = value
             self.setDriver(driver, value)
 
-    def _client(self):
-        return self._ctrl.clients.get(self.device_id)
+    def _device(self):
+        return self._ctrl._devices.get(self.device_id)
 
     def _run(self, coro, timeout=30):
         return self._ctrl._async.run(coro, timeout=timeout)
 
     # --- State update ---
     def update_from_status(self, status):
-        """Apply a Roborock status object to ISY drivers."""
+        """Apply a Roborock StatusTrait to ISY drivers.
+        StatusTrait inherits StatusV2, so attribute names are unchanged."""
         raw_state  = getattr(status, 'state',     0) or 0
         battery    = getattr(status, 'battery',   0) or 0
         fan_power  = getattr(status, 'fan_power', 101) or 101
@@ -305,25 +309,23 @@ class VacuumNode(udi_interface.Node):
         self._set('GV7', _pct(f,  'filter'))
 
     def query(self, command=None):
-        client = self._client()
-        if not client:
+        device = self._device()
+        if not device or not getattr(device, 'v1_properties', None):
             return
-        status = self._run(client.get_status())
-        if status:
-            self.update_from_status(status)
-        consumables = self._run(client.get_consumable())
-        if consumables:
-            self.update_from_consumables(consumables)
+        props = device.v1_properties
+        self._run(props.status.refresh(), timeout=30)
+        self.update_from_status(props.status)
+        self._run(props.consumables.refresh(), timeout=30)
+        self.update_from_consumables(props.consumables)
         self.reportDrivers()
 
     # --- Commands ---
     def _send(self, cmd, params=None):
-        client = self._client()
-        if not client:
-            LOGGER.warning(f'{self.name}: no client available')
+        device = self._device()
+        if not device or not getattr(device, 'v1_properties', None):
+            LOGGER.warning(f'{self.name}: no device available')
             return
-        coro = (client.send_command(cmd, params)
-                if params else client.send_command(cmd))
+        coro = device.v1_properties.command.send(cmd, params)
         self._run(coro)
 
     def cmd_start(self, command):
@@ -390,15 +392,14 @@ class Controller(udi_interface.Node):
         self.poly = polyglot
 
         # State
-        self._email        = ''
-        self._api_client   = None   # RoborockApiClient (for auth)
-        self.clients       = {}     # device_id → device client
-        self._vacuums      = {}     # address → VacuumNode
-        self.rooms         = []     # list of room name strings
-        self.room_ids      = []     # parallel list of room segment IDs
-        self._ip_overrides = {}     # node_address → IP string
-        self._customdata   = Custom(polyglot, 'customdata')
-        self._initialized  = False
+        self._email           = ''
+        self._device_manager  = None   # DeviceManager (owns MQTT + all devices)
+        self._devices         = {}     # duid → RoborockDevice
+        self._vacuums         = {}     # address → VacuumNode
+        self.rooms            = []     # room name strings (for ISY dropdown)
+        self.room_ids         = []     # parallel segment IDs
+        self._customdata      = Custom(polyglot, 'customdata')
+        self._initialized     = False
         self._controller_added = False
 
         # Infrastructure
@@ -452,6 +453,8 @@ class Controller(udi_interface.Node):
     def stop(self):
         LOGGER.info('Roborock NodeServer stopping')
         self.setDriver('ST', 0)
+        if self._device_manager:
+            self._async.run(self._device_manager.close(), timeout=10)
         self._async.shutdown()
 
     # --- Parameter / data handlers ---
@@ -466,15 +469,6 @@ class Controller(udi_interface.Node):
             return
 
         self._email = email
-
-        # Parse IP overrides: any param named robot_ip_<node_address>
-        self._ip_overrides = {
-            k[len('robot_ip_'):]: v.strip()
-            for k, v in params.items()
-            if k.startswith('robot_ip_') and v.strip()
-        }
-        if self._ip_overrides:
-            LOGGER.info(f'IP overrides configured: {self._ip_overrides}')
 
         if code:
             LOGGER.info('Login code provided — attempting login')
@@ -505,12 +499,11 @@ class Controller(udi_interface.Node):
     async def _connect_with_creds(self, creds_dict):
         """Restore a session from cached credentials and discover devices."""
         try:
-            from roborock.api import RoborockApiClient
-            from roborock.containers import UserData
-            user_data = UserData(**creds_dict)
-            self._api_client = RoborockApiClient(username=self._email)
-            home_data = await self._api_client.get_home_data_v2(user_data)
-            await self._setup_devices(user_data, home_data)
+            user_data = UserData.from_dict(creds_dict)
+            user_params = UserParams(username=self._email, user_data=user_data)
+            self._device_manager = await create_device_manager(user_params)
+            devices = await self._device_manager.get_devices()
+            await self._setup_devices(devices)
         except Exception as e:
             LOGGER.error(f'Failed to connect with cached credentials: {e}')
             self.poly.Notices['auth'] = f'Re-authentication required: {e}'
@@ -518,99 +511,58 @@ class Controller(udi_interface.Node):
     async def _do_code_login(self, code):
         """Exchange a verification code for credentials, cache, then connect."""
         try:
-            from roborock.api import RoborockApiClient
-            self._api_client = RoborockApiClient(username=self._email)
-            user_data = await self._api_client.code_login(code)
-            # Cache credentials
-            creds = {k: v for k, v in user_data.__dict__.items()
-                     if not k.startswith('_')}
-            self._customdata['roborock_creds'] = creds
+            api = RoborockApiClient(username=self._email)
+            user_data = await api.code_login(code)
+            self._customdata['roborock_creds'] = user_data.as_dict()
             LOGGER.info('Login successful — credentials cached')
-            home_data = await self._api_client.get_home_data_v2(user_data)
-            await self._setup_devices(user_data, home_data)
+            user_params = UserParams(username=self._email, user_data=user_data)
+            self._device_manager = await create_device_manager(user_params)
+            devices = await self._device_manager.get_devices()
+            await self._setup_devices(devices)
         except Exception as e:
             LOGGER.error(f'Code login failed: {e}')
             self.poly.Notices['auth'] = f'Login failed: {e}. Check the code and try again.'
 
-    async def _connect_local(self, device, ip, user_data):
-        """Try a direct local TCP connection to the given IP; raise on failure."""
-        from roborock.local_api import RoborockLocalClientV1
-        # Override the discovered IP with the user-supplied one
-        net = getattr(device, 'network', None)
-        if net is not None:
-            net.ip = ip
-        client = RoborockLocalClientV1(device)
-        await client.async_connect()
-        return client
-
-    async def _setup_devices(self, user_data, home_data):
-        """Create per-device clients from home data."""
+    async def _setup_devices(self, devices):
+        """Store devices and collect rooms from each V1 device."""
         try:
-            from roborock.cloud_api import RoborockMqttClientV1
-            # Collect rooms across all homes
+            self._devices = {d.duid: d for d in devices}
+
             all_rooms = []
-            for home in (home_data.homes or []):
-                for room in (getattr(home, 'rooms', []) or []):
-                    all_rooms.append(room)
+            all_room_ids = []
+            for device in devices:
+                props = getattr(device, 'v1_properties', None)
+                if not props:
+                    continue
+                try:
+                    await props.rooms.refresh()
+                    for room in (props.rooms.rooms or []):
+                        all_rooms.append(getattr(room, 'name', str(room.segment_id)))
+                        all_room_ids.append(room.segment_id)
+                except Exception as e:
+                    LOGGER.warning(f'Could not fetch rooms for {device.name}: {e}')
 
-            self.rooms   = [getattr(r, 'name', str(i)) for i, r in enumerate(all_rooms)]
-            self.room_ids = [getattr(r, 'id', i) for i, r in enumerate(all_rooms)]
-
-            # Create clients for each device
-            for home in (home_data.homes or []):
-                for device in (getattr(home, 'devices', []) or []):
-                    duid = getattr(device, 'duid', None) or getattr(device, 'deviceId', None)
-                    if not duid:
-                        continue
-                    raw_name    = getattr(device, 'name', duid)
-                    address     = _device_address(raw_name, duid)
-                    ip_override = self._ip_overrides.get(address)
-                    # Log device info so users know what param names to use
-                    discovered_ip = getattr(getattr(device, 'network', None), 'ip', 'unknown')
-                    LOGGER.info(
-                        f'Device: {raw_name!r}  address={address}  '
-                        f'discovered_ip={discovered_ip}  '
-                        f'ip_override={ip_override or "(none — set robot_ip_{address} to pin)"}'
-                    )
-                    try:
-                        if ip_override:
-                            client = await self._connect_local(
-                                device, ip_override, user_data)
-                        else:
-                            client = RoborockMqttClientV1(user_data, device)
-                            await client.async_connect()
-                        self.clients[duid] = client
-                        LOGGER.info(f'Connected to {raw_name!r} '
-                                    f'via {"local " + ip_override if ip_override else "cloud MQTT"}')
-                    except Exception as e:
-                        LOGGER.warning(f'Could not connect to {raw_name!r} ({duid}): {e}')
-
+            self.rooms    = all_rooms
+            self.room_ids = all_room_ids
             self._initialized = True
-            # Trigger sync discovery of nodes on the PG3 side
-            self._discover_nodes(home_data)
+            self._discover_nodes(devices)
         except Exception as e:
             LOGGER.error(f'Device setup failed: {e}')
 
-    def _discover_nodes(self, home_data):
+    def _discover_nodes(self, devices):
         """Add VacuumNode entries to ISY for each device (runs in sync context)."""
         _write_profile(self.rooms)
 
-        for home in (home_data.homes or []):
-            for device in (getattr(home, 'devices', []) or []):
-                duid = getattr(device, 'duid', None) or getattr(device, 'deviceId', None)
-                if not duid:
-                    continue
-                raw_name = getattr(device, 'name', duid)
-                address  = _device_address(raw_name, duid)
-                if address not in self._vacuums:
-                    LOGGER.info(f'Adding vacuum node: {raw_name} ({address})')
-                    node = VacuumNode(
-                        self.poly, self.address, address, raw_name, duid, self)
-                    self._add_node_wait(node)
-                    self._vacuums[address] = node
+        for device in devices:
+            address = _device_address(device.name, device.duid)
+            if address not in self._vacuums:
+                LOGGER.info(f'Adding vacuum node: {device.name} ({address})')
+                node = VacuumNode(
+                    self.poly, self.address, address, device.name, device.duid, self)
+                self._add_node_wait(node)
+                self._vacuums[address] = node
 
         self.poly.updateProfile()
-        # Initial state fetch
         for node in self._vacuums.values():
             node.query()
 
@@ -623,9 +575,8 @@ class Controller(udi_interface.Node):
             return
 
         async def _request():
-            from roborock.api import RoborockApiClient
-            self._api_client = RoborockApiClient(username=self._email)
-            await self._api_client.request_code()
+            api = RoborockApiClient(username=self._email)
+            await api.request_code()
             LOGGER.info(f'Verification code sent to {self._email}')
             self.poly.Notices['auth'] = (
                 f'Code sent to {self._email}. Enter it in the login_code parameter.')
@@ -659,35 +610,35 @@ class Controller(udi_interface.Node):
             self._poll_lock.release()
 
     def _short_poll(self):
-        async def _fetch_one(node, client):
+        async def _fetch_one(node, device):
             try:
-                status = await client.get_status()
-                if status:
-                    node.update_from_status(status)
+                await device.v1_properties.status.refresh()
+                node.update_from_status(device.v1_properties.status)
             except Exception as e:
                 LOGGER.warning(f'Short poll failed for {node.name}: {e}')
 
         async def _fetch_all():
-            tasks = [_fetch_one(node, self.clients[node.device_id])
+            tasks = [_fetch_one(node, self._devices[node.device_id])
                      for node in self._vacuums.values()
-                     if node.device_id in self.clients]
+                     if node.device_id in self._devices
+                     and getattr(self._devices[node.device_id], 'v1_properties', None)]
             await asyncio.gather(*tasks)
 
         self._async.run(_fetch_all(), timeout=60)
 
     def _long_poll(self):
-        async def _fetch_one(node, client):
+        async def _fetch_one(node, device):
             try:
-                consumables = await client.get_consumable()
-                if consumables:
-                    node.update_from_consumables(consumables)
+                await device.v1_properties.consumables.refresh()
+                node.update_from_consumables(device.v1_properties.consumables)
             except Exception as e:
                 LOGGER.warning(f'Long poll failed for {node.name}: {e}')
 
         async def _fetch_all():
-            tasks = [_fetch_one(node, self.clients[node.device_id])
+            tasks = [_fetch_one(node, self._devices[node.device_id])
                      for node in self._vacuums.values()
-                     if node.device_id in self.clients]
+                     if node.device_id in self._devices
+                     and getattr(self._devices[node.device_id], 'v1_properties', None)]
             await asyncio.gather(*tasks)
 
         self._async.run(_fetch_all(), timeout=60)
