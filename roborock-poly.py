@@ -488,6 +488,7 @@ class Controller(udi_interface.Node):
     def start(self):
         """Called by udi_interface after the controller addNode is acknowledged."""
         LOGGER.info('Roborock NodeServer starting')
+        self._controller_added = True  # prevents CONFIGDONE re-adding if START fires first
         self.setDriver('ST', 1)
         if not self._initialized:
             self._try_connect()
@@ -582,12 +583,27 @@ class Controller(udi_interface.Node):
                 try:
                     await props.rooms.refresh()
                     for room in (props.rooms.rooms or []):
-                        all_rooms.append(getattr(room, 'name', str(room.segment_id)))
-                        all_room_ids.append(room.segment_id)
+                        seg_id = room.segment_id
+                        # NamedRoomMapping uses raw_name; fall back to segment_id
+                        raw = getattr(room, 'raw_name', None) or str(seg_id)
+                        all_rooms.append(raw)
+                        all_room_ids.append(seg_id)
                 except Exception as e:
                     LOGGER.warning(f'Could not fetch rooms for {device.name}: {e}')
 
-            self.rooms    = all_rooms
+            # Disambiguate duplicate names (e.g. same room name on two floors)
+            seen: dict[str, int] = {}
+            for name in all_rooms:
+                seen[name] = seen.get(name, 0) + 1
+            deduped = []
+            counts: dict[str, int] = {}
+            for name, seg_id in zip(all_rooms, all_room_ids):
+                if seen[name] > 1:
+                    counts[name] = counts.get(name, 0) + 1
+                    deduped.append(f'{name} ({seg_id})')
+                else:
+                    deduped.append(name)
+            self.rooms    = deduped
             self.room_ids = all_room_ids
             self._initialized = True
             self._discover_nodes(devices)
