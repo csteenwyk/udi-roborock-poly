@@ -390,7 +390,7 @@ class VacuumNode(udi_interface.Node):
 
     def cmd_set_child_lock(self, command):
         val = int(command.get('value', 0))
-        self._send(RoborockCommand.SET_CHILD_LOCK_STATUS, [{'lock_status': bool(val)}])
+        self._send(RoborockCommand.SET_CHILD_LOCK_STATUS, {'lock_status': 1 if val else 0})
 
     def cmd_clean_room(self, command):
         idx = int(command.get('value', 0))
