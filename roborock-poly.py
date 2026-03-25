@@ -428,6 +428,13 @@ class Controller(udi_interface.Node):
 
     def start(self):
         LOGGER.info('Roborock NodeServer starting')
+        # Always add the controller node so the user can click commands
+        # (e.g. "Request Login Code") even before authentication completes.
+        if not self._controller_added:
+            _write_profile([])
+            self._add_node_wait(self)
+            self._controller_added = True
+        self.setDriver('ST', 1)
         if not self._initialized:
             self._try_connect()
 
@@ -576,11 +583,6 @@ class Controller(udi_interface.Node):
     def _discover_nodes(self, home_data):
         """Add VacuumNode entries to ISY for each device (runs in sync context)."""
         _write_profile(self.rooms)
-
-        if not self._controller_added:
-            self._add_node_wait(self)
-            self._controller_added = True
-        self.setDriver('ST', 1)
 
         for home in (home_data.homes or []):
             for device in (getattr(home, 'devices', []) or []):
