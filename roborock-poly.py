@@ -247,16 +247,16 @@ class VacuumNode(udi_interface.Node):
     id = 'roborock_vacuum'
 
     drivers = [
-        {'driver': 'ST',    'value': 0,  'uom': 25},  # Vacuum state
-        {'driver': 'BATLVL','value': 0,  'uom': 51},  # Battery %
-        {'driver': 'GV1',   'value': 0,  'uom': 25},  # Fan speed
-        {'driver': 'GV2',   'value': 0,  'uom': 25},  # Error code
-        {'driver': 'GV3',   'value': 0,  'uom': 56},  # Clean area m²
-        {'driver': 'GV4',   'value': 0,  'uom': 56},  # Clean time min
-        {'driver': 'GV5',   'value': 100,'uom': 51},  # Main brush %
-        {'driver': 'GV6',   'value': 100,'uom': 51},  # Side brush %
-        {'driver': 'GV7',   'value': 100,'uom': 51},  # Filter %
-        {'driver': 'GV8',   'value': 0,  'uom': 2},   # Water box present
+        {'driver': 'ST',    'value': 0,  'uom': 25},
+        {'driver': 'BATLVL','value': 0,  'uom': 51},
+        {'driver': 'GV1',   'value': 0,  'uom': 25},
+        {'driver': 'GV2',   'value': 0,  'uom': 25},
+        {'driver': 'GV3',   'value': 0,  'uom': 56},
+        {'driver': 'GV4',   'value': 0,  'uom': 56},
+        {'driver': 'GV5',   'value': 100,'uom': 51},
+        {'driver': 'GV6',   'value': 100,'uom': 51},
+        {'driver': 'GV7',   'value': 100,'uom': 51},
+        {'driver': 'GV8',   'value': 0,  'uom': 2},
     ]
 
     def __init__(self, polyglot, primary, address, name, device_id, ctrl):
@@ -313,9 +313,12 @@ class VacuumNode(udi_interface.Node):
         if not device or not getattr(device, 'v1_properties', None):
             return
         props = device.v1_properties
-        self._run(props.status.refresh(), timeout=30)
+
+        async def _refresh():
+            await asyncio.gather(props.status.refresh(), props.consumables.refresh())
+
+        self._run(_refresh(), timeout=30)
         self.update_from_status(props.status)
-        self._run(props.consumables.refresh(), timeout=30)
         self.update_from_consumables(props.consumables)
         self.reportDrivers()
 
@@ -399,6 +402,8 @@ class Controller(udi_interface.Node):
         self.rooms            = []     # room name strings (for ISY dropdown)
         self.room_ids         = []     # parallel segment IDs
         self._customdata      = Custom(polyglot, 'customdata')
+        self._params          = Custom(polyglot, 'customparams')
+        self._login_api       = None   # reuse client between request_code and code_login
         self._initialized     = False
         self._controller_added = False
 
@@ -445,7 +450,6 @@ class Controller(udi_interface.Node):
     def start(self):
         """Called by udi_interface after the controller addNode is acknowledged."""
         LOGGER.info('Roborock NodeServer starting')
-        self._controller_added = True  # guard against _on_config_done re-adding
         self.setDriver('ST', 1)
         if not self._initialized:
             self._try_connect()
@@ -460,6 +464,7 @@ class Controller(udi_interface.Node):
     # --- Parameter / data handlers ---
 
     def param_handler(self, params):
+        self._params.load(params)
         self.poly.Notices.clear()
         email = params.get('email', '').strip()
         code  = params.get('login_code', '').strip()
@@ -471,12 +476,11 @@ class Controller(udi_interface.Node):
         self._email = email
 
         if code:
+            code = re.sub(r'\D', '', code)   # strip spaces/dashes the user may have typed
             LOGGER.info('Login code provided — attempting login')
             self._async.run(self._do_code_login(code))
             # Clear the code from params so it isn't stored in plain text
-            updated = dict(params)
-            updated['login_code'] = ''
-            self.poly.saveCustomParams(updated)
+            self._params['login_code'] = ''
         elif not self._initialized:
             # No code yet — try with cached credentials
             self._try_connect()
@@ -496,14 +500,18 @@ class Controller(udi_interface.Node):
             return
         self._async.run(self._connect_with_creds(creds))
 
+    async def _connect_with_user_data(self, user_data):
+        """Create a device manager from UserData and discover devices."""
+        user_params = UserParams(username=self._email, user_data=user_data)
+        self._device_manager = await create_device_manager(user_params)
+        devices = await self._device_manager.get_devices()
+        await self._setup_devices(devices)
+
     async def _connect_with_creds(self, creds_dict):
         """Restore a session from cached credentials and discover devices."""
         try:
             user_data = UserData.from_dict(creds_dict)
-            user_params = UserParams(username=self._email, user_data=user_data)
-            self._device_manager = await create_device_manager(user_params)
-            devices = await self._device_manager.get_devices()
-            await self._setup_devices(devices)
+            await self._connect_with_user_data(user_data)
         except Exception as e:
             LOGGER.error(f'Failed to connect with cached credentials: {e}')
             self.poly.Notices['auth'] = f'Re-authentication required: {e}'
@@ -511,14 +519,13 @@ class Controller(udi_interface.Node):
     async def _do_code_login(self, code):
         """Exchange a verification code for credentials, cache, then connect."""
         try:
-            api = RoborockApiClient(username=self._email)
+            # Reuse the same client that sent the code — it may hold region state.
+            api = self._login_api or RoborockApiClient(username=self._email)
             user_data = await api.code_login(code)
+            self._login_api = None
             self._customdata['roborock_creds'] = user_data.as_dict()
             LOGGER.info('Login successful — credentials cached')
-            user_params = UserParams(username=self._email, user_data=user_data)
-            self._device_manager = await create_device_manager(user_params)
-            devices = await self._device_manager.get_devices()
-            await self._setup_devices(devices)
+            await self._connect_with_user_data(user_data)
         except Exception as e:
             LOGGER.error(f'Code login failed: {e}')
             self.poly.Notices['auth'] = f'Login failed: {e}. Check the code and try again.'
@@ -575,8 +582,10 @@ class Controller(udi_interface.Node):
             return
 
         async def _request():
-            api = RoborockApiClient(username=self._email)
-            await api.request_code()
+            # Keep the client instance — request_code() may store region state
+            # that code_login() needs to use the same endpoint.
+            self._login_api = RoborockApiClient(username=self._email)
+            await self._login_api.request_code()
             LOGGER.info(f'Verification code sent to {self._email}')
             self.poly.Notices['auth'] = (
                 f'Code sent to {self._email}. Enter it in the login_code parameter.')
@@ -609,39 +618,36 @@ class Controller(udi_interface.Node):
         finally:
             self._poll_lock.release()
 
-    def _short_poll(self):
+    def _poll_all(self, refresh_fn, update_fn, label):
         async def _fetch_one(node, device):
             try:
-                await device.v1_properties.status.refresh()
-                node.update_from_status(device.v1_properties.status)
+                await refresh_fn(device)
+                update_fn(node, device)
             except Exception as e:
-                LOGGER.warning(f'Short poll failed for {node.name}: {e}')
+                LOGGER.warning(f'{label} poll failed for {node.name}: {e}')
 
         async def _fetch_all():
-            tasks = [_fetch_one(node, self._devices[node.device_id])
+            pairs = [(node, self._devices[node.device_id])
                      for node in self._vacuums.values()
                      if node.device_id in self._devices
                      and getattr(self._devices[node.device_id], 'v1_properties', None)]
-            await asyncio.gather(*tasks)
+            await asyncio.gather(*[_fetch_one(n, d) for n, d in pairs])
 
         self._async.run(_fetch_all(), timeout=60)
+
+    def _short_poll(self):
+        self._poll_all(
+            lambda d: d.v1_properties.status.refresh(),
+            lambda n, d: n.update_from_status(d.v1_properties.status),
+            'Short',
+        )
 
     def _long_poll(self):
-        async def _fetch_one(node, device):
-            try:
-                await device.v1_properties.consumables.refresh()
-                node.update_from_consumables(device.v1_properties.consumables)
-            except Exception as e:
-                LOGGER.warning(f'Long poll failed for {node.name}: {e}')
-
-        async def _fetch_all():
-            tasks = [_fetch_one(node, self._devices[node.device_id])
-                     for node in self._vacuums.values()
-                     if node.device_id in self._devices
-                     and getattr(self._devices[node.device_id], 'v1_properties', None)]
-            await asyncio.gather(*tasks)
-
-        self._async.run(_fetch_all(), timeout=60)
+        self._poll_all(
+            lambda d: d.v1_properties.consumables.refresh(),
+            lambda n, d: n.update_from_consumables(d.v1_properties.consumables),
+            'Long',
+        )
 
     commands = {
         'DISCOVER':      cmd_discover,
