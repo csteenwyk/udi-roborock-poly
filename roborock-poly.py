@@ -15,7 +15,6 @@ Custom Parameters:
 """
 
 import asyncio
-import json
 import os
 import re
 import sys
@@ -23,6 +22,11 @@ import threading
 
 import udi_interface
 from udi_interface import Custom
+
+try:
+    from roborock.roborock_typing import RoborockCommand
+except ImportError:
+    RoborockCommand = None  # populated once roborock package is installed
 
 LOGGER = udi_interface.LOGGER
 
@@ -66,8 +70,7 @@ FAN_SPEED_MAP  = {0: 101, 1: 102, 2: 103, 3: 104}   # Quiet/Balanced/Turbo/Max
 _FAN_TO_IDX    = {v: k for k, v in FAN_SPEED_MAP.items()}
 
 # ISY index → Roborock water_box_custom_mode value
-WATER_MAP    = {0: 200, 1: 201, 2: 202, 3: 203}      # Off/Mild/Moderate/Intense
-_WATER_TO_IDX = {v: k for k, v in WATER_MAP.items()}
+WATER_MAP = {0: 200, 1: 201, 2: 202, 3: 203}         # Off/Mild/Moderate/Intense
 
 # Consumable max usage times in seconds (manufacturer rated life)
 _CONSUMABLE_MAX = {
@@ -171,6 +174,10 @@ _STATIC_EDITORS = """\
 
 def _subset(lst):
     return ','.join(str(i) for i in range(len(lst))) if lst else '0'
+
+
+def _device_address(raw_name, duid):
+    return re.sub(r'[^a-z0-9]', '', raw_name.lower())[:14] or duid[:14]
 
 
 def _write_profile(rooms):
@@ -315,45 +322,36 @@ class VacuumNode(udi_interface.Node):
         if not client:
             LOGGER.warning(f'{self.name}: no client available')
             return
-        from roborock.roborock_typing import RoborockCommand
         coro = (client.send_command(cmd, params)
                 if params else client.send_command(cmd))
         self._run(coro)
 
     def cmd_start(self, command):
-        from roborock.roborock_typing import RoborockCommand
         self._send(RoborockCommand.APP_START)
 
     def cmd_stop(self, command):
-        from roborock.roborock_typing import RoborockCommand
         self._send(RoborockCommand.APP_STOP)
 
     def cmd_pause(self, command):
-        from roborock.roborock_typing import RoborockCommand
         self._send(RoborockCommand.APP_PAUSE)
 
     def cmd_dock(self, command):
-        from roborock.roborock_typing import RoborockCommand
         self._send(RoborockCommand.APP_CHARGE)
 
     def cmd_locate(self, command):
-        from roborock.roborock_typing import RoborockCommand
         self._send(RoborockCommand.FIND_ME)
 
     def cmd_set_fan(self, command):
-        from roborock.roborock_typing import RoborockCommand
         idx = int(command.get('value', 1))
         fan_power = FAN_SPEED_MAP.get(idx, 102)
         self._send(RoborockCommand.SET_CUSTOM_MODE, [fan_power])
 
     def cmd_set_water(self, command):
-        from roborock.roborock_typing import RoborockCommand
         idx = int(command.get('value', 1))
         water_mode = WATER_MAP.get(idx, 201)
         self._send(RoborockCommand.SET_WATER_BOX_CUSTOM_MODE, [water_mode])
 
     def cmd_clean_room(self, command):
-        from roborock.roborock_typing import RoborockCommand
         idx = int(command.get('value', 0))
         room_ids = self._ctrl.room_ids
         if idx < len(room_ids):
@@ -547,7 +545,7 @@ class Controller(udi_interface.Node):
                     if not duid:
                         continue
                     raw_name    = getattr(device, 'name', duid)
-                    address     = re.sub(r'[^a-z0-9]', '', raw_name.lower())[:14] or duid[:14]
+                    address     = _device_address(raw_name, duid)
                     ip_override = self._ip_overrides.get(address)
                     # Log device info so users know what param names to use
                     discovered_ip = getattr(getattr(device, 'network', None), 'ip', 'unknown')
@@ -590,7 +588,7 @@ class Controller(udi_interface.Node):
                 if not duid:
                     continue
                 raw_name = getattr(device, 'name', duid)
-                address  = re.sub(r'[^a-z0-9]', '', raw_name.lower())[:14] or duid[:14]
+                address  = _device_address(raw_name, duid)
                 if address not in self._vacuums:
                     LOGGER.info(f'Adding vacuum node: {raw_name} ({address})')
                     node = VacuumNode(
@@ -648,35 +646,38 @@ class Controller(udi_interface.Node):
             self._poll_lock.release()
 
     def _short_poll(self):
+        async def _fetch_one(node, client):
+            try:
+                status = await client.get_status()
+                if status:
+                    node.update_from_status(status)
+            except Exception as e:
+                LOGGER.warning(f'Short poll failed for {node.name}: {e}')
+
         async def _fetch_all():
-            from roborock.roborock_typing import RoborockCommand
-            for address, node in self._vacuums.items():
-                client = self.clients.get(node.device_id)
-                if not client:
-                    continue
-                try:
-                    status = await client.get_status()
-                    if status:
-                        node.update_from_status(status)
-                except Exception as e:
-                    LOGGER.warning(f'Short poll failed for {node.name}: {e}')
+            tasks = [_fetch_one(node, self.clients[node.device_id])
+                     for node in self._vacuums.values()
+                     if node.device_id in self.clients]
+            await asyncio.gather(*tasks)
 
         self._async.run(_fetch_all(), timeout=60)
 
     def _long_poll(self):
-        async def _fetch_consumables():
-            for address, node in self._vacuums.items():
-                client = self.clients.get(node.device_id)
-                if not client:
-                    continue
-                try:
-                    consumables = await client.get_consumable()
-                    if consumables:
-                        node.update_from_consumables(consumables)
-                except Exception as e:
-                    LOGGER.warning(f'Long poll failed for {node.name}: {e}')
+        async def _fetch_one(node, client):
+            try:
+                consumables = await client.get_consumable()
+                if consumables:
+                    node.update_from_consumables(consumables)
+            except Exception as e:
+                LOGGER.warning(f'Long poll failed for {node.name}: {e}')
 
-        self._async.run(_fetch_consumables(), timeout=60)
+        async def _fetch_all():
+            tasks = [_fetch_one(node, self.clients[node.device_id])
+                     for node in self._vacuums.values()
+                     if node.device_id in self.clients]
+            await asyncio.gather(*tasks)
+
+        self._async.run(_fetch_all(), timeout=60)
 
     commands = {
         'DISCOVER':      cmd_discover,
