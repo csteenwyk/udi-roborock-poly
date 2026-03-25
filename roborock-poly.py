@@ -406,6 +406,7 @@ class Controller(udi_interface.Node):
         self._poll_lock   = threading.Lock()
         self._node_added  = threading.Event()
 
+        polyglot.subscribe(polyglot.CONFIGDONE,   self._on_config_done)
         polyglot.subscribe(polyglot.START,        self.start)
         polyglot.subscribe(polyglot.CUSTOMPARAMS, self.param_handler)
         polyglot.subscribe(polyglot.CUSTOMDATA,   self.data_handler)
@@ -426,20 +427,27 @@ class Controller(udi_interface.Node):
         if not self._node_added.wait(timeout=timeout):
             LOGGER.warning(f'Timeout waiting for node {getattr(node, "address", "?")}')
 
-    def start(self):
-        LOGGER.info('Roborock NodeServer starting')
+    def _on_config_done(self):
+        """Fires after all getAll responses are processed — always fires, even on
+        first install when no nodes exist yet.  This is the right place to add the
+        controller node so that udi_interface can then fire the START event."""
+        if self._controller_added:
+            return
+        LOGGER.info('Config done — adding controller node')
         try:
-            # Always add the controller node so the user can click commands
-            # (e.g. "Request Login Code") even before authentication completes.
-            if not self._controller_added:
-                _write_profile([])
-                self._add_node_wait(self)
-                self._controller_added = True
-            self.setDriver('ST', 1)
-            if not self._initialized:
-                self._try_connect()
+            _write_profile([])
+            self._add_node_wait(self)
+            self._controller_added = True
         except Exception as e:
-            LOGGER.error(f'start() failed: {e}', exc_info=True)
+            LOGGER.error(f'Failed to add controller node: {e}', exc_info=True)
+
+    def start(self):
+        """Called by udi_interface after the controller addNode is acknowledged."""
+        LOGGER.info('Roborock NodeServer starting')
+        self._controller_added = True  # guard against _on_config_done re-adding
+        self.setDriver('ST', 1)
+        if not self._initialized:
+            self._try_connect()
 
     def stop(self):
         LOGGER.info('Roborock NodeServer stopping')
