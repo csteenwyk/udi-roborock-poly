@@ -22,6 +22,7 @@ import sys
 import threading
 
 import udi_interface
+from udi_interface import Custom
 
 LOGGER = udi_interface.LOGGER
 
@@ -398,6 +399,7 @@ class Controller(udi_interface.Node):
         self.rooms         = []     # list of room name strings
         self.room_ids      = []     # parallel list of room segment IDs
         self._ip_overrides = {}     # node_address → IP string
+        self._customdata   = Custom(polyglot, 'customdata')
         self._initialized  = False
         self._controller_added = False
 
@@ -470,12 +472,12 @@ class Controller(udi_interface.Node):
             self._try_connect()
 
     def data_handler(self, data):
-        """Called when customdata changes — credentials live here."""
-        pass  # _try_connect reads customdata via poly.customData
+        """Called by udi_interface when customdata is loaded."""
+        self._customdata.load(data)
 
     def _try_connect(self):
         """Attempt to connect using cached credentials."""
-        creds = self.poly.customData.get('roborock_creds')
+        creds = self._customdata.get('roborock_creds')
         if not creds:
             if self._email:
                 self.poly.Notices['auth'] = (
@@ -506,7 +508,7 @@ class Controller(udi_interface.Node):
             # Cache credentials
             creds = {k: v for k, v in user_data.__dict__.items()
                      if not k.startswith('_')}
-            self.poly.saveCustomData({'roborock_creds': creds})
+            self._customdata['roborock_creds'] = creds
             LOGGER.info('Login successful — credentials cached')
             home_data = await self._api_client.get_home_data_v2(user_data)
             await self._setup_devices(user_data, home_data)
