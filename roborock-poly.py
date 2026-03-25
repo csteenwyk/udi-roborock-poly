@@ -251,6 +251,10 @@ class _AsyncBridge:
             LOGGER.error(f'Async error: {e}')
             return None
 
+    def submit(self, coro):
+        """Submit a coroutine to the background loop without blocking."""
+        asyncio.run_coroutine_threadsafe(coro, self._loop)
+
     def shutdown(self):
         self._loop.call_soon_threadsafe(self._loop.stop)
 
@@ -523,7 +527,7 @@ class Controller(udi_interface.Node):
         if code:
             code = re.sub(r'\D', '', code)   # strip spaces/dashes the user may have typed
             LOGGER.info('Login code provided — attempting login')
-            self._async.run(self._do_code_login(code))
+            self._async.submit(self._do_code_login(code))
             # Clear the code from params so it isn't stored in plain text
             self._params['login_code'] = ''
         elif not self._initialized:
@@ -543,7 +547,7 @@ class Controller(udi_interface.Node):
                     'No credentials cached. Click "Request Login Code" on the '
                     'controller, then enter the code in the login_code parameter.')
             return
-        self._async.run(self._connect_with_creds(creds))
+        self._async.submit(self._connect_with_creds(creds))
 
     async def _connect_with_user_data(self, user_data):
         """Create a device manager from UserData and discover devices."""
@@ -654,7 +658,7 @@ class Controller(udi_interface.Node):
             self.poly.Notices['auth'] = (
                 f'Code sent to {self._email}. Enter it in the login_code parameter.')
 
-        self._async.run(_request())
+        self._async.submit(_request())
 
     def cmd_discover(self, command=None):
         if not self._initialized:
