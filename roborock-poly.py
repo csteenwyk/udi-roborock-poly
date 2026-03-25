@@ -359,8 +359,14 @@ class VacuumNode(udi_interface.Node):
         if not device or not getattr(device, 'v1_properties', None):
             LOGGER.warning(f'{self.name}: no device available')
             return
-        coro = device.v1_properties.command.send(cmd, params)
-        self._run(coro)
+
+        async def _do_send():
+            try:
+                await device.v1_properties.command.send(cmd, params)
+            except Exception as e:
+                LOGGER.error(f'{self.name}: command {cmd} failed: {e}')
+
+        self._ctrl._async.submit(_do_send())
 
     def cmd_start(self, command):
         self._send(RoborockCommand.APP_START)
