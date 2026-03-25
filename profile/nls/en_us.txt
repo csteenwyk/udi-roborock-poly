@@ -1,0 +1,63 @@
+# Node Server Names
+ND-roborock_controller-NAME = Roborock Controller
+ND-roborock_vacuum-NAME = Roborock Vacuum
+
+# Controller Drivers
+ST-roborock_controller-ST-NAME = Status
+
+# Controller Commands
+CMD-roborock_controller-DISCOVER-NAME = Re-Discover
+CMD-roborock_controller-REQUEST_CODE-NAME = Request Login Code
+CMD-roborock_controller-QUERY-NAME = Query All
+
+# Vacuum Drivers
+ST-roborock_vacuum-ST-NAME = State
+ST-roborock_vacuum-BATLVL-NAME = Battery
+ST-roborock_vacuum-GV1-NAME = Fan Speed
+ST-roborock_vacuum-GV2-NAME = Error
+ST-roborock_vacuum-GV3-NAME = Clean Area (m²)
+ST-roborock_vacuum-GV4-NAME = Clean Time (min)
+ST-roborock_vacuum-GV5-NAME = Main Brush
+ST-roborock_vacuum-GV6-NAME = Side Brush
+ST-roborock_vacuum-GV7-NAME = Filter
+ST-roborock_vacuum-GV8-NAME = Water Box
+
+# Vacuum Commands
+CMD-roborock_vacuum-START-NAME = Start Cleaning
+CMD-roborock_vacuum-STOP-NAME = Stop
+CMD-roborock_vacuum-PAUSE-NAME = Pause
+CMD-roborock_vacuum-DOCK-NAME = Return to Dock
+CMD-roborock_vacuum-LOCATE-NAME = Locate (Find Me)
+CMD-roborock_vacuum-SET_FAN-NAME = Set Fan Speed
+CMD-roborock_vacuum-SET_WATER-NAME = Set Water Level
+CMD-roborock_vacuum-CLEAN_ROOM-NAME = Clean Room
+CMD-roborock_vacuum-QUERY-NAME = Query
+
+# Vacuum state index values (UOM 25)
+CUST_VSTATE-0 = Unknown
+CUST_VSTATE-1 = Cleaning
+CUST_VSTATE-2 = Idle
+CUST_VSTATE-3 = Returning
+CUST_VSTATE-4 = Charging
+CUST_VSTATE-5 = Error
+CUST_VSTATE-6 = Paused
+CUST_VSTATE-7 = Spot Cleaning
+CUST_VSTATE-8 = Emptying Bin
+CUST_VSTATE-9 = Washing Mop
+CUST_VSTATE-10 = Charging Complete
+CUST_VSTATE-11 = Offline
+
+# Fan speed index values (UOM 25)
+CUST_FAN-0 = Quiet
+CUST_FAN-1 = Balanced
+CUST_FAN-2 = Turbo
+CUST_FAN-3 = Max
+
+# Water level index values (UOM 25)
+CUST_WATER-0 = Off
+CUST_WATER-1 = Mild
+CUST_WATER-2 = Moderate
+CUST_WATER-3 = Intense
+
+# Dynamic — Rooms (written at runtime)
+CUST_ROOM-0 = (loading...)

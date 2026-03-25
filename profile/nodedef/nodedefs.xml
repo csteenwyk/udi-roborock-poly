@@ -1,0 +1,56 @@
+<nodeDefs>
+
+  <!-- Controller Node -->
+  <nodeDef id="roborock_controller" nodeType="139" nls="roborock_controller">
+    <sts>
+      <st id="ST" editor="E_STATUS"/>
+    </sts>
+    <cmds>
+      <sends/>
+      <accepts>
+        <cmd id="QUERY"/>
+        <cmd id="DISCOVER"/>
+        <cmd id="REQUEST_CODE"/>
+      </accepts>
+    </cmds>
+  </nodeDef>
+
+  <!-- Vacuum Node -->
+  <nodeDef id="roborock_vacuum" nodeType="139" nls="roborock_vacuum">
+    <sts>
+      <st id="ST"    editor="E_VSTATE"/>  <!-- Vacuum state -->
+      <st id="BATLVL" editor="E_PERCENT"/> <!-- Battery % -->
+      <st id="GV1"   editor="E_FAN"/>     <!-- Fan speed -->
+      <st id="GV2"   editor="E_TIME"/>    <!-- Error code (raw) -->
+      <st id="GV3"   editor="E_AREA"/>    <!-- Clean area m² -->
+      <st id="GV4"   editor="E_TIME"/>    <!-- Clean time minutes -->
+      <st id="GV5"   editor="E_PERCENT"/> <!-- Main brush % -->
+      <st id="GV6"   editor="E_PERCENT"/> <!-- Side brush % -->
+      <st id="GV7"   editor="E_PERCENT"/> <!-- Filter % -->
+      <st id="GV8"   editor="E_STATUS"/>  <!-- Water box present -->
+    </sts>
+    <cmds>
+      <sends/>
+      <accepts>
+        <!-- Commands with parameters (vertical rows) -->
+        <cmd id="SET_FAN">
+          <p id="" editor="E_FAN" init="GV1"/>
+        </cmd>
+        <cmd id="SET_WATER">
+          <p id="" editor="E_WATER" init="GV9"/>
+        </cmd>
+        <cmd id="CLEAN_ROOM">
+          <p id="" editor="E_ROOM"/>
+        </cmd>
+        <!-- Commands without parameters (horizontal buttons) -->
+        <cmd id="START"/>
+        <cmd id="STOP"/>
+        <cmd id="PAUSE"/>
+        <cmd id="DOCK"/>
+        <cmd id="LOCATE"/>
+        <cmd id="QUERY"/>
+      </accepts>
+    </cmds>
+  </nodeDef>
+
+</nodeDefs>

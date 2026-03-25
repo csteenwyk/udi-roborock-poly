@@ -1,0 +1,28 @@
+<editors>
+  <editor id="E_VSTATE">
+    <range uom="25" subset="0,1,2,3,4,5,6,7,8,9,10,11" nls="CUST_VSTATE"/>
+  </editor>
+  <editor id="E_FAN">
+    <range uom="25" subset="0,1,2,3" nls="CUST_FAN"/>
+  </editor>
+  <editor id="E_WATER">
+    <range uom="25" subset="0,1,2,3" nls="CUST_WATER"/>
+  </editor>
+  <editor id="E_PERCENT">
+    <range uom="51" min="0" max="100" prec="0"/>
+  </editor>
+  <editor id="E_AREA">
+    <range uom="56" min="0" max="9999" prec="1"/>
+  </editor>
+  <editor id="E_TIME">
+    <range uom="56" min="0" max="9999" prec="0"/>
+  </editor>
+  <editor id="E_STATUS">
+    <range uom="2" subset="0,1"/>
+  </editor>
+
+  <!-- Dynamic — Rooms (rewritten at runtime by roborock-poly.py) -->
+  <editor id="E_ROOM">
+    <range uom="25" subset="0" nls="CUST_ROOM"/>
+  </editor>
+</editors>

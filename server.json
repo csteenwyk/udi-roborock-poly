@@ -1,0 +1,34 @@
+{
+    "name": "Roborock",
+    "docs": "https://github.com/csteenwyk/udi-roborock-poly",
+    "type": "python3",
+    "executable": "roborock-poly.py",
+    "install": "install.sh",
+    "description": "Roborock vacuum control for ISY. Start, stop, dock, room cleaning, fan speed, and consumable tracking.",
+    "shortPoll": "30",
+    "longPoll": "300",
+    "logLevel": "INFO",
+    "customParams": {
+        "email": "",
+        "login_code": ""
+    },
+    "credits": [
+        {
+            "title": "Roborock NodeServer",
+            "author": "csteenwyk",
+            "version": "1.0.0",
+            "date": "March 2026",
+            "source": "https://github.com/csteenwyk/udi-roborock-poly",
+            "license": "https://github.com/csteenwyk/udi-roborock-poly/blob/main/LICENSE"
+        }
+    ],
+    "store": {
+        "developer": "5737892+csteenwyk@users.noreply.github.com",
+        "purchaseOptions": [
+            {
+                "isPerpetual": true,
+                "price": 0
+            }
+        ]
+    }
+}

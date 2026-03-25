@@ -1,0 +1,2 @@
+python-roborock>=2.0.0
+udi_interface
