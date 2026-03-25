@@ -397,7 +397,7 @@ class VacuumNode(udi_interface.Node):
         room_ids = self._ctrl.room_ids
         if idx < len(room_ids):
             self._send(RoborockCommand.APP_SEGMENT_CLEAN,
-                       [{'segments': room_ids[idx], 'repeat': 1}])
+                       [{'segments': [room_ids[idx]], 'repeat': 1}])
         else:
             LOGGER.warning(f'{self.name}: room index {idx} out of range')
 
