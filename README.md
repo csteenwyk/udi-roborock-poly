@@ -49,33 +49,6 @@ Roborock uses email + one-time code authentication (no password).
 |-----------|-------------|
 | `email` | Your Roborock account email **(required)** |
 | `login_code` | One-time code from email (set once to authenticate, then cleared) |
-| `robot_ip_<address>` | Optional: pin a robot to a specific IP for direct local connection |
-
-### Pinning a robot's IP address
-
-By default the plugin uses the IP address reported by the Roborock cloud. If your vacuum has
-a static IP (via DHCP reservation), you can pin it to guarantee local communication even if
-the cloud reports a stale address.
-
-After the first successful connection, the plugin logs each robot's **node address** and
-**discovered IP**:
-
-```
-Device: 'Living Room'  address=livingroom  discovered_ip=192.168.1.50  ip_override=(none — set robot_ip_livingroom to pin)
-```
-
-Add a Custom Parameter using that address:
-
-| Parameter | Example value |
-|-----------|---------------|
-| `robot_ip_livingroom` | `192.168.1.50` |
-| `robot_ip_kitchen` | `192.168.1.51` |
-
-When an IP override is set, the plugin connects directly via local TCP (port 58867) and falls
-back to cloud MQTT only if the local connection fails.
-
-> **Note:** Cloud authentication is still required once on first install — the local key used
-> to authenticate the direct connection is obtained during that initial login.
 
 ## Nodes
 
@@ -133,9 +106,4 @@ Then Send Notification 'Time to replace main brush'
 
 ## Network Notes
 
-```
-ISY / PG3x  →  LAN port 58867  →  Roborock vacuum (preferred)
-ISY / PG3x  →  Internet MQTT   →  Roborock cloud  →  vacuum (fallback)
-```
-
-The plugin uses `python-roborock` which automatically negotiates local vs. cloud per device. Assign a static IP (DHCP reservation) to your vacuum for reliable local communication.
+The plugin uses `python-roborock` which automatically negotiates local vs. cloud communication per device — no manual IP configuration needed. If your vacuum is reachable on the LAN it will be used directly; otherwise the cloud MQTT path is used as fallback.
