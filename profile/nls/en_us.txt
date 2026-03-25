@@ -21,6 +21,9 @@ ST-roborock_vacuum-GV5-NAME = Main Brush
 ST-roborock_vacuum-GV6-NAME = Side Brush
 ST-roborock_vacuum-GV7-NAME = Filter
 ST-roborock_vacuum-GV8-NAME = Water Box
+ST-roborock_vacuum-GV9-NAME = Water Level
+ST-roborock_vacuum-GV10-NAME = Mop Mode
+ST-roborock_vacuum-GV11-NAME = Child Lock
 
 # Vacuum Commands
 CMD-roborock_vacuum-START-NAME = Start Cleaning
@@ -30,6 +33,8 @@ CMD-roborock_vacuum-DOCK-NAME = Return to Dock
 CMD-roborock_vacuum-LOCATE-NAME = Locate (Find Me)
 CMD-roborock_vacuum-SET_FAN-NAME = Set Fan Speed
 CMD-roborock_vacuum-SET_WATER-NAME = Set Water Level
+CMD-roborock_vacuum-SET_MOP-NAME = Set Mop Mode
+CMD-roborock_vacuum-SET_CHILD_LOCK-NAME = Child Lock
 CMD-roborock_vacuum-CLEAN_ROOM-NAME = Clean Room
 CMD-roborock_vacuum-QUERY-NAME = Query
 
@@ -58,6 +63,11 @@ CUST_WATER-0 = Off
 CUST_WATER-1 = Mild
 CUST_WATER-2 = Moderate
 CUST_WATER-3 = Intense
+
+# Mop mode index values (UOM 25)
+CUST_MOP-0 = Standard
+CUST_MOP-1 = Deep
+CUST_MOP-2 = Deep+
 
 # Dynamic — Rooms (written at runtime)
 CUST_ROOM-0 = (loading...)

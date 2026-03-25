@@ -74,6 +74,9 @@ Roborock uses email + one-time code authentication (no password).
 | GV6 | Side brush remaining % |
 | GV7 | Filter remaining % |
 | GV8 | Water box attached |
+| GV9 | Water level (current read-back) |
+| GV10 | Mop mode: Standard / Deep / Deep+ |
+| GV11 | Child lock: On / Off |
 
 **Commands:**
 
@@ -81,6 +84,8 @@ Roborock uses email + one-time code authentication (no password).
 |---------|-------------|
 | Set Fan Speed | Quiet / Balanced / Turbo / Max |
 | Set Water Level | Off / Mild / Moderate / Intense |
+| Set Mop Mode | Standard / Deep / Deep+ |
+| Child Lock | On / Off |
 | Clean Room | Pick a room by name from ISY dropdown |
 | Start Cleaning | Start a full clean |
 | Stop | Stop current task |

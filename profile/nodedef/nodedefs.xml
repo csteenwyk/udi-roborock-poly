@@ -28,6 +28,9 @@
       <st id="GV6"   editor="E_PERCENT"/> <!-- Side brush % -->
       <st id="GV7"   editor="E_PERCENT"/> <!-- Filter % -->
       <st id="GV8"   editor="E_STATUS"/>  <!-- Water box present -->
+      <st id="GV9"   editor="E_WATER"/>   <!-- Water level (current) -->
+      <st id="GV10"  editor="E_MOP"/>     <!-- Mop mode -->
+      <st id="GV11"  editor="E_STATUS"/>  <!-- Child lock -->
     </sts>
     <cmds>
       <sends/>
@@ -38,6 +41,12 @@
         </cmd>
         <cmd id="SET_WATER">
           <p id="" editor="E_WATER" init="GV9"/>
+        </cmd>
+        <cmd id="SET_MOP">
+          <p id="" editor="E_MOP" init="GV10"/>
+        </cmd>
+        <cmd id="SET_CHILD_LOCK">
+          <p id="" editor="E_STATUS" init="GV11"/>
         </cmd>
         <cmd id="CLEAN_ROOM">
           <p id="" editor="E_ROOM"/>

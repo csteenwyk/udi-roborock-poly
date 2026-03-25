@@ -72,8 +72,13 @@ _ROBOROCK_TO_STATE = {
 FAN_SPEED_MAP  = {0: 101, 1: 102, 2: 103, 3: 104}   # Quiet/Balanced/Turbo/Max
 _FAN_TO_IDX    = {v: k for k, v in FAN_SPEED_MAP.items()}
 
-# ISY index → Roborock water_box_custom_mode value
-WATER_MAP = {0: 200, 1: 201, 2: 202, 3: 203}         # Off/Mild/Moderate/Intense
+# ISY index → Roborock water_box_mode value
+WATER_MAP    = {0: 200, 1: 201, 2: 202, 3: 203}      # Off/Mild/Moderate/Intense
+_WATER_TO_IDX = {v: k for k, v in WATER_MAP.items()}
+
+# ISY index → Roborock mop_mode value (common across all S/Q models)
+MOP_MODE_MAP  = {0: 300, 1: 301, 2: 303}             # Standard/Deep/Deep+
+_MOP_TO_IDX   = {v: k for k, v in MOP_MODE_MAP.items()}
 
 # Consumable max usage times in seconds (manufacturer rated life)
 _CONSUMABLE_MAX = {
@@ -111,6 +116,9 @@ ST-roborock_vacuum-GV5-NAME = Main Brush
 ST-roborock_vacuum-GV6-NAME = Side Brush
 ST-roborock_vacuum-GV7-NAME = Filter
 ST-roborock_vacuum-GV8-NAME = Water Box
+ST-roborock_vacuum-GV9-NAME = Water Level
+ST-roborock_vacuum-GV10-NAME = Mop Mode
+ST-roborock_vacuum-GV11-NAME = Child Lock
 
 # Vacuum Commands
 CMD-roborock_vacuum-START-NAME = Start Cleaning
@@ -120,6 +128,8 @@ CMD-roborock_vacuum-DOCK-NAME = Return to Dock
 CMD-roborock_vacuum-LOCATE-NAME = Locate (Find Me)
 CMD-roborock_vacuum-SET_FAN-NAME = Set Fan Speed
 CMD-roborock_vacuum-SET_WATER-NAME = Set Water Level
+CMD-roborock_vacuum-SET_MOP-NAME = Set Mop Mode
+CMD-roborock_vacuum-SET_CHILD_LOCK-NAME = Child Lock
 CMD-roborock_vacuum-CLEAN_ROOM-NAME = Clean Room
 CMD-roborock_vacuum-QUERY-NAME = Query
 
@@ -148,6 +158,11 @@ CUST_WATER-0 = Off
 CUST_WATER-1 = Mild
 CUST_WATER-2 = Moderate
 CUST_WATER-3 = Intense
+
+# Mop mode index values (UOM 25)
+CUST_MOP-0 = Standard
+CUST_MOP-1 = Deep
+CUST_MOP-2 = Deep+
 """
 
 _STATIC_EDITORS = """\
@@ -171,6 +186,9 @@ _STATIC_EDITORS = """\
   </editor>
   <editor id="E_STATUS">
     <range uom="2" subset="0,1"/>
+  </editor>
+  <editor id="E_MOP">
+    <range uom="25" subset="0,1,2" nls="CUST_MOP"/>
   </editor>\
 """
 
@@ -257,6 +275,9 @@ class VacuumNode(udi_interface.Node):
         {'driver': 'GV6',   'value': 100,'uom': 51},
         {'driver': 'GV7',   'value': 100,'uom': 51},
         {'driver': 'GV8',   'value': 0,  'uom': 2},
+        {'driver': 'GV9',   'value': 0,  'uom': 25},
+        {'driver': 'GV10',  'value': 0,  'uom': 25},
+        {'driver': 'GV11',  'value': 0,  'uom': 2},
     ]
 
     def __init__(self, polyglot, primary, address, name, device_id, ctrl):
@@ -280,21 +301,27 @@ class VacuumNode(udi_interface.Node):
     def update_from_status(self, status):
         """Apply a Roborock StatusTrait to ISY drivers.
         StatusTrait inherits StatusV2, so attribute names are unchanged."""
-        raw_state  = getattr(status, 'state',     0) or 0
-        battery    = getattr(status, 'battery',   0) or 0
-        fan_power  = getattr(status, 'fan_power', 101) or 101
-        error_code = getattr(status, 'error_code',0) or 0
-        area_cm2   = getattr(status, 'clean_area',0) or 0   # cm²
-        clean_sec  = getattr(status, 'clean_time',0) or 0   # seconds
+        raw_state  = getattr(status, 'state',            0) or 0
+        battery    = getattr(status, 'battery',          0) or 0
+        fan_power  = getattr(status, 'fan_power',      101) or 101
+        error_code = getattr(status, 'error_code',       0) or 0
+        area_cm2   = getattr(status, 'clean_area',       0) or 0
+        clean_sec  = getattr(status, 'clean_time',       0) or 0
         water_box  = getattr(status, 'water_box_status', 0) or 0
+        water_mode = getattr(status, 'water_box_mode',   0) or 0
+        mop_mode   = getattr(status, 'mop_mode',         0) or 0
+        lock       = getattr(status, 'lock_status',      0) or 0
 
         self._set('ST',    _ROBOROCK_TO_STATE.get(raw_state, 0))
         self._set('BATLVL', battery)
         self._set('GV1',   _FAN_TO_IDX.get(fan_power, 1))
         self._set('GV2',   error_code)
-        self._set('GV3',   round(area_cm2 / 1_000_000, 1))   # m²
-        self._set('GV4',   clean_sec // 60)                   # minutes
+        self._set('GV3',   round(area_cm2 / 1_000_000, 1))
+        self._set('GV4',   clean_sec // 60)
         self._set('GV8',   1 if water_box else 0)
+        self._set('GV9',   _WATER_TO_IDX.get(water_mode, 0))
+        self._set('GV10',  _MOP_TO_IDX.get(mop_mode, 0))
+        self._set('GV11',  1 if lock else 0)
 
     def update_from_consumables(self, consumables):
         def _pct(used, key):
@@ -356,6 +383,15 @@ class VacuumNode(udi_interface.Node):
         water_mode = WATER_MAP.get(idx, 201)
         self._send(RoborockCommand.SET_WATER_BOX_CUSTOM_MODE, [water_mode])
 
+    def cmd_set_mop(self, command):
+        idx = int(command.get('value', 0))
+        mop_val = MOP_MODE_MAP.get(idx, 300)
+        self._send(RoborockCommand.SET_MOP_MODE, [mop_val])
+
+    def cmd_set_child_lock(self, command):
+        val = int(command.get('value', 0))
+        self._send(RoborockCommand.SET_CHILD_LOCK_STATUS, [{'lock_status': bool(val)}])
+
     def cmd_clean_room(self, command):
         idx = int(command.get('value', 0))
         room_ids = self._ctrl.room_ids
@@ -372,8 +408,10 @@ class VacuumNode(udi_interface.Node):
         'DOCK':       cmd_dock,
         'LOCATE':     cmd_locate,
         'SET_FAN':    cmd_set_fan,
-        'SET_WATER':  cmd_set_water,
-        'CLEAN_ROOM': cmd_clean_room,
+        'SET_WATER':       cmd_set_water,
+        'SET_MOP':         cmd_set_mop,
+        'SET_CHILD_LOCK':  cmd_set_child_lock,
+        'CLEAN_ROOM':      cmd_clean_room,
         'QUERY':      query,
     }
 

@@ -21,6 +21,10 @@
     <range uom="2" subset="0,1"/>
   </editor>
 
+  <editor id="E_MOP">
+    <range uom="25" subset="0,1,2" nls="CUST_MOP"/>
+  </editor>
+
   <!-- Dynamic — Rooms (rewritten at runtime by roborock-poly.py) -->
   <editor id="E_ROOM">
     <range uom="25" subset="0" nls="CUST_ROOM"/>
