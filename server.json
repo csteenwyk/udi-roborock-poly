@@ -10,7 +10,8 @@
     "logLevel": "INFO",
     "customParams": {
         "email": "",
-        "login_code": ""
+        "login_code": "",
+        "robot_ip_example": "192.168.1.x"
     },
     "credits": [
         {

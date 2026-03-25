@@ -397,6 +397,7 @@ class Controller(udi_interface.Node):
         self._vacuums      = {}     # address → VacuumNode
         self.rooms         = []     # list of room name strings
         self.room_ids      = []     # parallel list of room segment IDs
+        self._ip_overrides = {}     # node_address → IP string
         self._initialized  = False
         self._controller_added = False
 
@@ -447,6 +448,15 @@ class Controller(udi_interface.Node):
             return
 
         self._email = email
+
+        # Parse IP overrides: any param named robot_ip_<node_address>
+        self._ip_overrides = {
+            k[len('robot_ip_'):]: v.strip()
+            for k, v in params.items()
+            if k.startswith('robot_ip_') and v.strip()
+        }
+        if self._ip_overrides:
+            LOGGER.info(f'IP overrides configured: {self._ip_overrides}')
 
         if code:
             LOGGER.info('Login code provided — attempting login')
@@ -504,6 +514,17 @@ class Controller(udi_interface.Node):
             LOGGER.error(f'Code login failed: {e}')
             self.poly.Notices['auth'] = f'Login failed: {e}. Check the code and try again.'
 
+    async def _connect_local(self, device, ip, user_data):
+        """Try a direct local TCP connection to the given IP; raise on failure."""
+        from roborock.local_api import RoborockLocalClientV1
+        # Override the discovered IP with the user-supplied one
+        net = getattr(device, 'network', None)
+        if net is not None:
+            net.ip = ip
+        client = RoborockLocalClientV1(device)
+        await client.async_connect()
+        return client
+
     async def _setup_devices(self, user_data, home_data):
         """Create per-device clients from home data."""
         try:
@@ -523,13 +544,28 @@ class Controller(udi_interface.Node):
                     duid = getattr(device, 'duid', None) or getattr(device, 'deviceId', None)
                     if not duid:
                         continue
+                    raw_name    = getattr(device, 'name', duid)
+                    address     = re.sub(r'[^a-z0-9]', '', raw_name.lower())[:14] or duid[:14]
+                    ip_override = self._ip_overrides.get(address)
+                    # Log device info so users know what param names to use
+                    discovered_ip = getattr(getattr(device, 'network', None), 'ip', 'unknown')
+                    LOGGER.info(
+                        f'Device: {raw_name!r}  address={address}  '
+                        f'discovered_ip={discovered_ip}  '
+                        f'ip_override={ip_override or "(none — set robot_ip_{address} to pin)"}'
+                    )
                     try:
-                        client = RoborockMqttClientV1(user_data, device)
-                        await client.async_connect()
+                        if ip_override:
+                            client = await self._connect_local(
+                                device, ip_override, user_data)
+                        else:
+                            client = RoborockMqttClientV1(user_data, device)
+                            await client.async_connect()
                         self.clients[duid] = client
-                        LOGGER.info(f'Connected to device: {getattr(device, "name", duid)}')
+                        LOGGER.info(f'Connected to {raw_name!r} '
+                                    f'via {"local " + ip_override if ip_override else "cloud MQTT"}')
                     except Exception as e:
-                        LOGGER.warning(f'Could not connect to {duid}: {e}')
+                        LOGGER.warning(f'Could not connect to {raw_name!r} ({duid}): {e}')
 
             self._initialized = True
             # Trigger sync discovery of nodes on the PG3 side
