@@ -547,6 +547,7 @@ class Controller(udi_interface.Node):
                     'No credentials cached. Click "Request Login Code" on the '
                     'controller, then enter the code in the login_code parameter.')
             return
+        self._initialized = True   # prevent duplicate attempts while connecting
         self._async.submit(self._connect_with_creds(creds))
 
     async def _connect_with_user_data(self, user_data):
@@ -564,6 +565,7 @@ class Controller(udi_interface.Node):
         except Exception as e:
             LOGGER.error(f'Failed to connect with cached credentials: {e}')
             self.poly.Notices['auth'] = f'Re-authentication required: {e}'
+            self._initialized = False   # allow retry
 
     async def _do_code_login(self, code):
         """Exchange a verification code for credentials, cache, then connect."""
