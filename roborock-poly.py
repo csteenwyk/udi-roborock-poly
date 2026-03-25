@@ -428,15 +428,18 @@ class Controller(udi_interface.Node):
 
     def start(self):
         LOGGER.info('Roborock NodeServer starting')
-        # Always add the controller node so the user can click commands
-        # (e.g. "Request Login Code") even before authentication completes.
-        if not self._controller_added:
-            _write_profile([])
-            self._add_node_wait(self)
-            self._controller_added = True
-        self.setDriver('ST', 1)
-        if not self._initialized:
-            self._try_connect()
+        try:
+            # Always add the controller node so the user can click commands
+            # (e.g. "Request Login Code") even before authentication completes.
+            if not self._controller_added:
+                _write_profile([])
+                self._add_node_wait(self)
+                self._controller_added = True
+            self.setDriver('ST', 1)
+            if not self._initialized:
+                self._try_connect()
+        except Exception as e:
+            LOGGER.error(f'start() failed: {e}', exc_info=True)
 
     def stop(self):
         LOGGER.info('Roborock NodeServer stopping')
