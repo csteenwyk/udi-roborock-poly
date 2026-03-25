@@ -478,11 +478,13 @@ class Controller(udi_interface.Node):
             return
         LOGGER.info('Config done — adding controller node')
         try:
-            _write_profile([])
+            # Only clear the profile on first install. On restarts, param_handler
+            # fires before CONFIGDONE and the connection may already be live with
+            # rooms populated — don't wipe them.
+            if not self.rooms:
+                _write_profile([])
             self._add_node_wait(self)
             self._controller_added = True
-            # Set ST here so it's live even if START doesn't fire (e.g. on restarts
-            # where PG3 only sends START for newly-added nodes, not existing ones).
             self.setDriver('ST', 1)
             if not self._initialized:
                 self._try_connect()
@@ -584,30 +586,34 @@ class Controller(udi_interface.Node):
                 props = getattr(device, 'v1_properties', None)
                 if not props:
                     continue
+                fetched = False
+                # Prefer maps API: gives per-floor (per-map) room lists with names
                 try:
-                    await props.rooms.refresh()
-                    for room in (props.rooms.rooms or []):
-                        seg_id = room.segment_id
-                        # NamedRoomMapping uses raw_name; fall back to segment_id
-                        raw = getattr(room, 'raw_name', None) or str(seg_id)
-                        all_rooms.append(raw)
-                        all_room_ids.append(seg_id)
+                    await props.maps.refresh()
+                    for map_info in (props.maps.map_info or []):
+                        floor = (map_info.name or 'Floor').strip()
+                        for room in (map_info.rooms or []):
+                            seg_id  = getattr(room, 'id', None)
+                            name    = getattr(room, 'iot_name', None) or str(seg_id)
+                            all_rooms.append(f'{floor}: {name}')
+                            all_room_ids.append(seg_id)
+                    fetched = bool(all_rooms)
                 except Exception as e:
-                    LOGGER.warning(f'Could not fetch rooms for {device.name}: {e}')
+                    LOGGER.warning(f'Could not fetch maps for {device.name}: {e}')
 
-            # Disambiguate duplicate names (e.g. same room name on two floors)
-            seen: dict[str, int] = {}
-            for name in all_rooms:
-                seen[name] = seen.get(name, 0) + 1
-            deduped = []
-            counts: dict[str, int] = {}
-            for name, seg_id in zip(all_rooms, all_room_ids):
-                if seen[name] > 1:
-                    counts[name] = counts.get(name, 0) + 1
-                    deduped.append(f'{name} ({seg_id})')
-                else:
-                    deduped.append(name)
-            self.rooms    = deduped
+                if not fetched:
+                    # Fall back to flat rooms list (no floor info)
+                    try:
+                        await props.rooms.refresh()
+                        for room in (props.rooms.rooms or []):
+                            seg_id = room.segment_id
+                            name   = getattr(room, 'raw_name', None) or str(seg_id)
+                            all_rooms.append(name)
+                            all_room_ids.append(seg_id)
+                    except Exception as e:
+                        LOGGER.warning(f'Could not fetch rooms for {device.name}: {e}')
+
+            self.rooms    = all_rooms
             self.room_ids = all_room_ids
             self._initialized = True
             self._discover_nodes(devices)
