@@ -473,8 +473,7 @@ class Controller(udi_interface.Node):
 
     def _on_config_done(self):
         """Fires after all getAll responses are processed — always fires, even on
-        first install when no nodes exist yet.  This is the right place to add the
-        controller node so that udi_interface can then fire the START event."""
+        first install when no nodes exist yet."""
         if self._controller_added:
             return
         LOGGER.info('Config done — adding controller node')
@@ -482,13 +481,18 @@ class Controller(udi_interface.Node):
             _write_profile([])
             self._add_node_wait(self)
             self._controller_added = True
+            # Set ST here so it's live even if START doesn't fire (e.g. on restarts
+            # where PG3 only sends START for newly-added nodes, not existing ones).
+            self.setDriver('ST', 1)
+            if not self._initialized:
+                self._try_connect()
         except Exception as e:
             LOGGER.error(f'Failed to add controller node: {e}', exc_info=True)
 
     def start(self):
-        """Called by udi_interface after the controller addNode is acknowledged."""
-        LOGGER.info('Roborock NodeServer starting')
-        self._controller_added = True  # prevents CONFIGDONE re-adding if START fires first
+        """Called by udi_interface after a fresh addNode is acknowledged."""
+        LOGGER.info('Roborock NodeServer start event')
+        self._controller_added = True
         self.setDriver('ST', 1)
         if not self._initialized:
             self._try_connect()
