@@ -483,7 +483,7 @@ class Controller(udi_interface.Node):
             # rooms populated — don't wipe them.
             if not self.rooms:
                 _write_profile([])
-            self._add_node_wait(self)
+            self._add_node_wait(self, timeout=3)
             self._controller_added = True
             self.setDriver('ST', 1)
             if not self._initialized:
